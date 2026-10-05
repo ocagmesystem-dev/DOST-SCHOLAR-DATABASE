@@ -128,7 +128,7 @@ nav button.on{color:var(--accent);border-bottom-color:var(--accent)}
   </div>
   <div class="note" id="ro" hidden>You have read-only access: you can view but not edit records.</div>
   <div class="tbl"><table>
-    <thead><tr><th>No.</th><th>Name</th><th>Course</th><th>School</th><th>Level</th><th>Graduation</th><th></th></tr></thead>
+    <thead><tr><th>No.</th><th>Name</th><th>Course</th><th>School</th><th>Level</th><th>Status</th><th></th></tr></thead>
     <tbody id="rows"></tbody>
   </table></div>
 </div>
@@ -157,14 +157,14 @@ nav button.on{color:var(--accent);border-bottom-color:var(--accent)}
     <label>New or lateral<select id="entryType"><option value="">Select…</option><option>New</option><option>Lateral</option></select></label>
     <label>Part time or full time<select id="loadType"><option value="">Select…</option><option>Full time</option><option>Part time</option></select></label>
     <label>Date started (month and year)<input id="de" type="month" title="Month and year the scholar started the program"></label>
-    <label>Expected completion (month and year)<input id="gexp" type="month" title="Auto-set to 2 years after the date started"></label>
-    <label>Scholarship duration<input id="dur" readonly placeholder="Auto-computed" title="Worked out from the date started and expected completion"></label>
-    <div class="note" style="grid-column:1/-1;margin:-2px 0 0">Expected completion is set automatically to 2 years after the date started (MS and PhD), and the duration follows from it. You can still change the expected completion, e.g. for an extension.</div>
+    <label>Expected completion (month and year)<input id="gexp" type="month" title="Auto-set from the date started: 2 school years of class months (Aug-May)"></label>
+    <label>Scholarship duration<input id="dur" readonly placeholder="Auto-computed" title="Class months counted from the date started to the expected completion"></label>
+    <div class="note" style="grid-column:1/-1;margin:-2px 0 0">Expected completion is worked out automatically from the date started. The scholarship covers 2 school years, counting only months with official classes (August to May; June and July are not counted), which is 20 class months. Lateral entrants are capped at the end of the 2nd school year of the program, so they get fewer months if they start mid-year. Full time and part time currently count the same. You can still change the expected completion, e.g. for an extension.</div>
     <label style="grid-column:1/-1">Remarks<textarea id="remarks" rows="2" placeholder="Optional notes"></textarea></label>
     <div class="sec">Graduation tracker</div>
     <div class="trk">
       <label>Status<select id="gstat"><option>Ongoing</option><option>Extended</option><option>On leave</option><option>Graduated</option><option>Terminated</option></select></label>
-      <label id="gdateL" hidden>Date graduated<input id="gdate" type="date"></label>
+      <label id="gdateL" hidden>Date graduated (month and year)<input id="gdate" type="month"></label>
     </div>
     <div class="actions"><button class="p" type="submit" id="save">Add scholar</button><button type="button" id="cancel">Cancel</button></div>
   </form>
@@ -277,16 +277,38 @@ $("noMid").onchange=toggleMid;
 const GRAD_YEARS=2; // MS and PhD: 2 years
 function addYears(ds,n){if(!ds)return"";const mo=ds.length===7,y=+ds.slice(0,4),m=+ds.slice(5,7)-1,d=mo?1:+ds.slice(8,10);if(isNaN(y)||isNaN(m)||isNaN(d))return"";
   const t=new Date(Date.UTC(y+n,m,d));if(t.getUTCMonth()!==((m%12)+12)%12)t.setUTCDate(0);const o=t.toISOString().slice(0,10);return mo?o.slice(0,7):o}
-function durLabel(a,b){if(!a||!b)return"";const mo=(+b.slice(0,4)-+a.slice(0,4))*12+(+b.slice(5,7)-+a.slice(5,7));if(!(mo>0))return"";
-  const y=Math.floor(mo/12),m=mo%12;return[y?y+" year"+(y>1?"s":""):"",m?m+" month"+(m>1?"s":""):""].filter(Boolean).join(" ")}
-const expGrad=r=>r.gradExpected||(r.dateEnrolled?addYears(r.dateEnrolled,GRAD_YEARS):"");
+// ---- Expected completion rule ----
+// The scholarship covers 2 school years. Only months with official classes count:
+// regular terms run August to May (1st sem Aug-Dec, 2nd sem Jan-May); June and July (midyear/summer) are skipped.
+// Change the numbers below if the rule changes.
+const CLASS_MONTHS={full:20,part:20}; // 2 school years x 10 class months
+const isClassMonth=m=>m!==5&&m!==6; // m = 0-based month (5 = Jun, 6 = Jul)
+const ym=(y,m)=>y+"-"+String(m+1).padStart(2,"0");
+function expectedFor(de,entry,load){
+  if(!de||de.length<7)return"";
+  const y=+de.slice(0,4),m=+de.slice(5,7)-1;if(isNaN(y)||isNaN(m))return"";
+  const n=load==="Part time"?CLASS_MONTHS.part:CLASS_MONTHS.full;
+  let c=0,yy=y,mm=m,end="";
+  for(;;){if(isClassMonth(mm)&&++c===n){end=ym(yy,mm);break}if(++mm>11){mm=0;yy++}}
+  if(entry==="Lateral"){ // lateral entrants are capped at the end (May) of the 2nd school year of the program
+    const sy=m<=4?y-1:y,cap=ym(sy+2,4);if(cap<end)end=cap}
+  return end}
+function classMonths(a,b){
+  if(!a||!b)return 0;
+  let y=+a.slice(0,4),m=+a.slice(5,7)-1;const ey=+b.slice(0,4),em=+b.slice(5,7)-1;
+  if(isNaN(y)||isNaN(m)||isNaN(ey)||isNaN(em))return 0;
+  let c=0;while(y<ey||(y===ey&&m<=em)){if(isClassMonth(m))c++;if(++m>11){m=0;y++}}return c}
+function durLabel(a,b){const n=classMonths(a,b);if(!n)return"";
+  const sy=n%10===0?" ("+(n/10)+" school year"+(n/10>1?"s":"")+")":"";return n+" class month"+(n>1?"s":"")+sy}
+const expGrad=r=>r.gradExpected||expectedFor((r.dateEnrolled||"").slice(0,7),r.entryType,r.loadType);
 const durOf=r=>durLabel((r.dateEnrolled||"").slice(0,7),(expGrad(r)||"").slice(0,7))||r.duration||"";
 function updateDur(){$("dur").value=durLabel($("de").value,$("gexp").value)}
 let gexpManual=false;
-function autoExp(){if(!gexpManual)$("gexp").value=addYears($("de").value,GRAD_YEARS);updateDur()}
+const autoVal=()=>expectedFor($("de").value,$("entryType").value,$("loadType").value);
+function autoExp(){if(!gexpManual)$("gexp").value=autoVal();updateDur()}
 $("de").addEventListener("input",autoExp);$("de").addEventListener("change",autoExp);
-$("degree").addEventListener("change",autoExp);
-$("gexp").addEventListener("input",()=>{gexpManual=!!$("gexp").value&&$("gexp").value!==addYears($("de").value,GRAD_YEARS);updateDur()});
+$("degree").addEventListener("change",autoExp);$("entryType").addEventListener("change",autoExp);$("loadType").addEventListener("change",autoExp);
+$("gexp").addEventListener("input",()=>{gexpManual=!!$("gexp").value&&$("gexp").value!==autoVal();updateDur()});
 function toggleGrad(){$("gdateL").hidden=$("gstat").value!=="Graduated"}
 $("gstat").onchange=toggleGrad;
 function toggleOther(){const o=$("course").value==="__other";$("courseOtherL").hidden=!o;$("courseOther").required=o}
@@ -325,8 +347,8 @@ function openUpdate(id){const r=rows.find(x=>x.id===id);if(!r)return;editId=id;
   $("surname").value=sn||"";$("given").value=gn||"";$("middle").value=r.middleName??"";$("noMid").checked=!!r.noMiddleName;toggleMid();
   const m={address:"address",birth:"birthdate",bsYear:"bsYear",bsSchool:"bsSchool",school:"school",entryType:"entryType",loadType:"loadType",remarks:"remarks",degree:"degree",de:"dateEnrolled",gexp:"gradExpected",gdate:"gradDate"};
   Object.entries(m).forEach(([id,k])=>$(id).value=r[k]??"");
-  $("de").value=(r.dateEnrolled||"").slice(0,7);$("gexp").value=(r.gradExpected||"").slice(0,7);
-  $("bs").value=r.bs??"";$("gstat").value=r.gradStatus||"Ongoing";gexpManual=false;if(!$("gexp").value)autoExp();else gexpManual=$("gexp").value!==addYears($("de").value,GRAD_YEARS);updateDur();if(!$("dur").value&&r.duration)$("dur").value=r.duration;toggleGrad();
+  $("de").value=(r.dateEnrolled||"").slice(0,7);$("gdate").value=(r.gradDate||"").slice(0,7);$("gexp").value=(r.gradExpected||"").slice(0,7);
+  $("bs").value=r.bs??"";$("gstat").value=r.gradStatus||"Ongoing";gexpManual=false;{const cur=$("gexp").value,auto=autoVal();if(!cur)autoExp();else if(cur===auto)gexpManual=false;else if(cur===addYears($("de").value,GRAD_YEARS)){$("gexp").value=auto;gexpManual=false}else gexpManual=true}updateDur();if(!$("dur").value&&r.duration)$("dur").value=r.duration;toggleGrad();
   setCourse(r.course);
   $("save").textContent="Update scholar";$("mTitle").textContent="Update scholar";openModal();
   if(r.hasPhoto||r.photo)loadPhoto(id).then(src=>{if(src&&editId===id&&photoState==="keep")setPhotoPreview(src)})}
@@ -351,7 +373,7 @@ function openView(id){const r=rows.find(x=>x.id===id);if(!r)return;viewId=id;
   ];
   $("vbody").innerHTML=secs.map(([t,f])=>`<h3 class="sec">${t}</h3>`+f.map(([k,v])=>`<dt>${k}</dt><dd>${esc(v||"—")}</dd>`).join("")).join("")+
    `<h3 class="sec">Graduation tracker</h3><dt>Status</dt><dd><span class="gtag ${gcls(r)}">${esc(gst)}</span></dd>`+
-   (gst==="Graduated"?`<dt>Date graduated</dt><dd>${esc(fmt(r.gradDate)||"—")}</dd>`:"")+
+   (gst==="Graduated"?`<dt>Date graduated</dt><dd>${esc(fm(r.gradDate)||"—")}</dd>`:"")+
    prog;
   $("vUpd").hidden=!canWrite;$("vDel").hidden=!canWrite;
   const has=r.hasPhoto||r.photo;$("vph").innerHTML=has?"Loading…":"No photo";
@@ -371,7 +393,7 @@ $("q").oninput=render;$("fd").onchange=render;
 $("csv").onclick=async()=>{
   const h=["Surname","Given name","Middle name","Birthdate","Address","Bachelor's degree","Year graduated","School graduated","Level","Course","School","New or lateral","Part time or full time","Date started","Expected completion","Scholarship duration","Graduation status","Date graduated","Remarks"];
   const q=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
-  const csv=[h.map(q).join(",")].concat(rows.map(r=>[r.surname??(r.name||"").split(",")[0],r.givenName??(r.name||"").split(",").slice(1).join(",").trim(),r.middleName,r.birthdate,r.address,r.bs,r.bsYear,r.bsSchool,r.degree,r.course,r.school,r.entryType,r.loadType,(r.dateEnrolled||"").slice(0,7),(expGrad(r)||"").slice(0,7),durOf(r),r.gradStatus||"Ongoing",r.gradDate,r.remarks].map(q).join(","))).join("\n");
+  const csv=[h.map(q).join(",")].concat(rows.map(r=>[r.surname??(r.name||"").split(",")[0],r.givenName??(r.name||"").split(",").slice(1).join(",").trim(),r.middleName,r.birthdate,r.address,r.bs,r.bsYear,r.bsSchool,r.degree,r.course,r.school,r.entryType,r.loadType,(r.dateEnrolled||"").slice(0,7),(expGrad(r)||"").slice(0,7),durOf(r),r.gradStatus||"Ongoing",(r.gradDate||"").slice(0,7),r.remarks].map(q).join(","))).join("\n");
   saveFile("scholars.csv","\ufeff"+csv,"text/csv;charset=utf-8");
 };
 
@@ -454,8 +476,9 @@ function parseImport(aoa,existing){
     if(!gn&&!errs.length)errs.push("Given name missing");
     const mv=sv(g("middle")),noMid=!mv||/^(n\/?a|none|no middle( name)?|-+|—)$/i.test(mv);
     const dt=(f,label,req)=>{const d=impDate(g(f));if(d===null){errs.push("Invalid "+label);return""}if(req&&!d)errs.push(label[0].toUpperCase()+label.slice(1)+" missing");return d};
-    const birth=dt("birth","birthdate"),gDate=dt("gradDate","date graduated");
+    const birth=dt("birth","birthdate");
     const mt=(f,label)=>{const d=impMonth(g(f));if(d===null){errs.push("Invalid "+label);return""}return d};
+    const gDate=mt("gradDate","date graduated");
     const dEnr=mt("dateEnrolled","date started"),gExpIn=mt("gradExpected","expected completion");
     const degree=impDegree(g("degree"));if(degree===null)errs.push("Level must be MS or PhD");else if(!degree)errs.push("Level missing");
     let course=sv(g("course"));if(!course)errs.push("Course missing");else{const k=known.find(x=>x.toLowerCase()===course.toLowerCase());if(k)course=k}
@@ -468,7 +491,7 @@ function parseImport(aoa,existing){
     const rec={surname:sn,givenName:gn,middleName:middle,noMiddleName:noMid,name:sn+", "+gn+(middle?" "+middle:""),
       address:sv(g("address")),birthdate:birth,bs:sv(g("bs")),bsYear:by,bsSchool:sv(g("bsSchool")),
       course,school,entryType:entry||"",loadType:load||"",remarks:sv(g("remarks")),degree:degree||"",dateEnrolled:dEnr,
-      gradStatus:st||"Ongoing",gradExpected:gExpIn||(dEnr?addYears(dEnr,GRAD_YEARS):""),duration:"",gradDate:st==="Graduated"?gDate:"",updated:Date.now()};
+      gradStatus:st||"Ongoing",gradExpected:gExpIn||expectedFor(dEnr,entry||"",load||""),duration:"",gradDate:st==="Graduated"?gDate:"",updated:Date.now()};
     rec.duration=durLabel(dEnr,rec.gradExpected)||sv(g("duration"));
     let dup="";
     const k=keyOf(sn,gn),list=seen[k]||[];
@@ -535,14 +558,15 @@ $("tplBtn").onclick=async()=>{
   const notes=[["Column","What to enter"],
    ["Surname, Given name","Required."],
    ["Middle name","Leave blank (or type N/A) if the scholar has no middle name."],
-   ["Birthdate, Date graduated","Excel dates or YYYY-MM-DD. Both optional."],
+   ["Birthdate","Excel date or YYYY-MM-DD. Optional."],
+   ["Date graduated","Month and year, e.g. June 2027 or 2027-06. Only used when Graduation status is Graduated."],
    ["Address, Bachelor's degree, Year graduated, School graduated","Optional. Year graduated is the 4-digit year the BS was finished."],
    ["Level","Required: MS or PhD."],
    ["Course","Required, e.g. Agronomy, Animal Science, Entomology, Food Science and Technology, Horticulture, Soil Science (other courses are accepted)."],
    ["School","Required."],
    ["New or lateral","New or Lateral (optional)."],
    ["Part time or full time","Full time or Part time (optional)."],
-   ["Date started, Expected completion","Month and year, e.g. August 2025 or 2025-08. Leave Expected completion blank to set it to 2 years after Date started."],
+   ["Date started, Expected completion","Month and year, e.g. August 2025 or 2025-08. Leave Expected completion blank to compute it from Date started (2 school years of class months, Aug-May; lateral entrants are capped at the end of the 2nd school year)."],
    ["Scholarship duration","Leave blank: it is worked out from Date started and Expected completion."],
    ["Graduation status","Ongoing, Extended, On leave, Graduated or Terminated (blank = Ongoing)."],
    ["Remarks","Optional notes."],
