@@ -111,8 +111,6 @@ nav button.on{color:var(--accent);border-bottom-color:var(--accent)}
 <div class="grid2">
   <div class="panel"><h2>By school</h2><div id="bSchool"></div></div>
   <div class="panel"><h2>By course</h2><div id="bCourse"></div></div>
-  <div class="panel"><h2>By year level</h2><div id="bYear"></div></div>
-  <div class="panel"><h2>By semester &amp; school year</h2><div id="bSem"></div></div>
   <div class="panel"><h2>Recently added</h2><div id="recent"></div></div>
 </div>
 </section>
@@ -130,7 +128,7 @@ nav button.on{color:var(--accent);border-bottom-color:var(--accent)}
   </div>
   <div class="note" id="ro" hidden>You have read-only access: you can view but not edit records.</div>
   <div class="tbl"><table>
-    <thead><tr><th>No.</th><th>Name</th><th>Course</th><th>School</th><th>Level</th><th>Year level</th><th>Semester / SY</th><th>Date</th><th>Graduation</th><th></th></tr></thead>
+    <thead><tr><th>No.</th><th>Name</th><th>Course</th><th>School</th><th>Level</th><th>Graduation</th><th></th></tr></thead>
     <tbody id="rows"></tbody>
   </table></div>
 </div>
@@ -152,15 +150,12 @@ nav button.on{color:var(--accent);border-bottom-color:var(--accent)}
     <label>Year graduated<input id="bsYear" type="number" min="1950" max="2100" placeholder="e.g. 2023"></label>
     <label>School graduated<input id="bsSchool" placeholder="School where BS was finished"></label>
     <div class="sec">Scholarship grant</div>
-    <label>Date scholarship granted<input id="date" type="date" required></label>
     <label>Level<select id="degree"><option>MS</option><option>PhD</option></select></label>
     <label>Course<select id="course" required><option value="">Select course…</option><option>Agronomy</option><option>Animal Science</option><option>Entomology</option><option>Food Science and Technology</option><option>Horticulture</option><option>Soil Science</option><option value="__other">Other (type below)…</option></select></label>
     <label id="courseOtherL" hidden>Other course<input id="courseOther" placeholder="Type course"></label>
     <label>School<input id="school" required></label>
     <label>New or lateral<select id="entryType"><option value="">Select…</option><option>New</option><option>Lateral</option></select></label>
     <label>Part time or full time<select id="loadType"><option value="">Select…</option><option>Full time</option><option>Part time</option></select></label>
-    <label>Semester<select id="semester"><option>1st Semester</option><option>2nd Semester</option><option>Midyear</option></select></label>
-    <label>School year<input id="sy" placeholder="2026-2027" pattern="\d{4}-\d{4}"></label>
     <label>Date started (month and year)<input id="de" type="month" title="Month and year the scholar started the program"></label>
     <label>Expected completion (month and year)<input id="gexp" type="month" title="Auto-set to 2 years after the date started"></label>
     <label>Scholarship duration<input id="dur" readonly placeholder="Auto-computed" title="Worked out from the date started and expected completion"></label>
@@ -181,7 +176,7 @@ nav button.on{color:var(--accent);border-bottom-color:var(--accent)}
     <div class="note" id="iFile" style="margin:0 0 4px"></div>
     <div class="isum" id="iSum"></div>
     <label class="chk" id="iDupL" hidden style="margin-bottom:8px"><input type="checkbox" id="iSkipDup" checked> Skip rows that match an existing scholar (same name and birthdate)</label>
-    <div class="tbl"><table class="itbl"><thead><tr><th>Row</th><th>Name</th><th>Course</th><th>School</th><th>Level</th><th>Date granted</th><th>Result</th></tr></thead><tbody id="iRows"></tbody></table></div>
+    <div class="tbl"><table class="itbl"><thead><tr><th>Row</th><th>Name</th><th>Course</th><th>School</th><th>Level</th><th>Result</th></tr></thead><tbody id="iRows"></tbody></table></div>
     <div class="note">Only the first sheet is read. Rows with errors are skipped; fix them in Excel and import again.</div>
     <div class="actions"><button class="p" type="button" id="iGo">Import</button><button type="button" id="iCancel">Cancel</button></div>
   </div>
@@ -214,26 +209,13 @@ let db=null,col=null,rows=[],editId=null,canWrite=true;
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
 let viewId=null;
-// School year starts in August; year level is counted from the enrolled school year to today's school year
-const ayStart=(d=new Date())=>d.getMonth()>=7?d.getFullYear():d.getFullYear()-1;
-const ayOf=ds=>{const y=+ds.slice(0,4),m=+ds.slice(5,7)-1;return isNaN(y)?null:(m>=7?y:y-1)};
 const gcls=r=>(r.gradStatus||"Ongoing").replace(/\s/g,"");
-function enrolledAY(r){
-  if(r.dateEnrolled){const a=ayOf(r.dateEnrolled);if(a!=null)return a}
-  if(r.yearEnrolled)return +r.yearEnrolled;
-  const m=(r.sy||"").match(/^(\d{4})/);if(m)return +m[1];
-  if(r.date){const d=new Date(r.date);if(!isNaN(d))return ayStart(d)}
-  return null;
-}
-function ordinal(n){const v=n%100,x=["th","st","nd","rd"];return n+(x[(v-20)%10]||x[v]||x[0])}
-function yearLabel(r){const e=enrolledAY(r);if(e==null)return"—";const n=ayStart()-e+1;return n<1?"Incoming":ordinal(n)+" Year"}
-$("date").valueAsDate=new Date();
 
 function render(){
   const q=$("q").value.toLowerCase(),fd=$("fd").value;
   const list=rows.filter(r=>(!fd||r.degree===fd)&&(!q||[r.name,r.address,r.bs,r.bsSchool,r.course,r.school].join(" ").toLowerCase().includes(q)));
   dash();
-  $("rows").innerHTML=list.length?list.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.name)}</td><td>${esc(r.course)}</td><td>${esc(r.school)}</td><td><span class="tag ${r.degree==="PhD"?"PhD":"MS"}">${esc(r.degree)}</span></td><td>${esc(yearLabel(r))}</td><td>${esc(r.semester)}${r.sy?" · "+esc(r.sy):""}</td><td>${esc(r.date)}</td><td><span class="gtag ${gcls(r)}">${esc(r.gradStatus||"Ongoing")}</span></td><td style="white-space:nowrap"><button data-w="${esc(r.id)}">View</button>${canWrite?` <button data-e="${esc(r.id)}">Update</button> <button class="d" data-d="${esc(r.id)}">Delete</button>`:""}</td></tr>`).join(""):`<tr><td colspan="10" class="empty">No scholars yet. Add the first record above.</td></tr>`;
+  $("rows").innerHTML=list.length?list.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.name)}</td><td>${esc(r.course)}</td><td>${esc(r.school)}</td><td><span class="tag ${r.degree==="PhD"?"PhD":"MS"}">${esc(r.degree)}</span></td><td><span class="gtag ${gcls(r)}">${esc(r.gradStatus||"Ongoing")}</span></td><td style="white-space:nowrap"><button data-w="${esc(r.id)}">View</button>${canWrite?` <button data-e="${esc(r.id)}">Update</button> <button class="d" data-d="${esc(r.id)}">Delete</button>`:""}</td></tr>`).join(""):`<tr><td colspan="7" class="empty">No scholars yet. Add the first record above.</td></tr>`;
 }
 function bars(id,keyFn){
   const m={};rows.forEach(r=>{const k=keyFn(r);if(k)m[k]=(m[k]||0)+1});
@@ -247,8 +229,6 @@ function dash(){
   $("sPhD").textContent=rows.filter(r=>r.degree==="PhD").length;
   $("sSch").textContent=bars("bSchool",r=>(r.school||"").trim());
   $("sCrs").textContent=bars("bCourse",r=>(r.course||"").trim());
-  bars("bYear",r=>yearLabel(r)==="—"?"":yearLabel(r));
-  bars("bSem",r=>[r.semester,r.sy].filter(Boolean).join(" · "));
   const rc=rows.slice().sort((a,b)=>(b.updated||0)-(a.updated||0)).slice(0,6);
   $("recent").innerHTML=rc.length?rc.map(r=>`<div class="rec"><span>${esc(r.name)}<br><small>${esc(r.course)}${r.school?" · "+esc(r.school):""}</small></span><span class="tag ${r.degree==="PhD"?"PhD":"MS"}">${esc(r.degree)}</span></div>`).join(""):'<div class="note">No scholars yet.</div>';
 }
@@ -269,9 +249,8 @@ $("f").addEventListener("submit",async e=>{
   const gs=$("gstat").value;
   const rec={surname:sur,givenName:giv,middleName:mid,noMiddleName:$("noMid").checked,name:sur+", "+giv+(mid?" "+mid:""),address:$("address").value.trim(),birthdate:$("birth").value,
     bs:$("bs").value.trim(),bsYear:$("bsYear").value?+$("bsYear").value:"",bsSchool:$("bsSchool").value.trim(),
-    course:getCourse(),school:$("school").value.trim(),entryType:$("entryType").value,loadType:$("loadType").value,duration:$("dur").value,remarks:$("remarks").value.trim(),degree:$("degree").value,semester:$("semester").value,sy:$("sy").value.trim(),
-    date:$("date").value,dateEnrolled:$("de").value,gradStatus:gs,gradExpected:$("gexp").value,gradDate:gs==="Graduated"?$("gdate").value:"",updated:Date.now()};
-  if($("de").value)rec.yearEnrolled=ayOf($("de").value);
+    course:getCourse(),school:$("school").value.trim(),entryType:$("entryType").value,loadType:$("loadType").value,duration:$("dur").value,remarks:$("remarks").value.trim(),degree:$("degree").value,
+    dateEnrolled:$("de").value,gradStatus:gs,gradExpected:$("gexp").value,gradDate:gs==="Graduated"?$("gdate").value:"",updated:Date.now()};
   if(photoState==="new")rec.hasPhoto=true;else if(photoState==="remove")rec.hasPhoto=false;
   if(!col){ // offline fallback: in-page only
     if(photoState==="new")rec.photo=photoData;
@@ -334,7 +313,7 @@ $("photo").onchange=async e=>{const f=e.target.files[0];e.target.value="";if(!f)
   if(!f.type.startsWith("image/")){alert("Please choose an image file.");return}
   try{photoData=await fileToSquare(f);photoState="new";setPhotoPreview(photoData)}catch(err){alert(err.message)}};
 $("phRm").onclick=()=>{photoData=null;photoState="remove";setPhotoPreview(null)};
-function reset(){editId=null;photoData=null;photoState="keep";setPhotoPreview(null);$("f").reset();toggleOther();$("date").valueAsDate=new Date();gexpManual=false;toggleGrad();toggleMid();$("save").textContent="Add scholar";$("mTitle").textContent="Add scholar";$("modal").hidden=true}
+function reset(){editId=null;photoData=null;photoState="keep";setPhotoPreview(null);$("f").reset();toggleOther();gexpManual=false;toggleGrad();toggleMid();$("save").textContent="Add scholar";$("mTitle").textContent="Add scholar";$("modal").hidden=true}
 function openModal(){$("modal").hidden=false;setTimeout(()=>$("surname").focus(),30)}
 $("cancel").onclick=reset;$("x").onclick=reset;
 $("modal").addEventListener("mousedown",e=>{if(e.target.id==="modal")reset()});
@@ -344,7 +323,7 @@ function openUpdate(id){const r=rows.find(x=>x.id===id);if(!r)return;editId=id;
   let sn=r.surname,gn=r.givenName;
   if(sn==null&&gn==null){const p=(r.name||"").split(",");sn=p[0].trim();gn=p.slice(1).join(",").trim()}
   $("surname").value=sn||"";$("given").value=gn||"";$("middle").value=r.middleName??"";$("noMid").checked=!!r.noMiddleName;toggleMid();
-  const m={address:"address",birth:"birthdate",bsYear:"bsYear",bsSchool:"bsSchool",school:"school",entryType:"entryType",loadType:"loadType",remarks:"remarks",degree:"degree",semester:"semester",sy:"sy",date:"date",de:"dateEnrolled",gexp:"gradExpected",gdate:"gradDate"};
+  const m={address:"address",birth:"birthdate",bsYear:"bsYear",bsSchool:"bsSchool",school:"school",entryType:"entryType",loadType:"loadType",remarks:"remarks",degree:"degree",de:"dateEnrolled",gexp:"gradExpected",gdate:"gradDate"};
   Object.entries(m).forEach(([id,k])=>$(id).value=r[k]??"");
   $("de").value=(r.dateEnrolled||"").slice(0,7);$("gexp").value=(r.gradExpected||"").slice(0,7);
   $("bs").value=r.bs??"";$("gstat").value=r.gradStatus||"Ongoing";gexpManual=false;if(!$("gexp").value)autoExp();else gexpManual=$("gexp").value!==addYears($("de").value,GRAD_YEARS);updateDur();if(!$("dur").value&&r.duration)$("dur").value=r.duration;toggleGrad();
@@ -368,7 +347,7 @@ function openView(id){const r=rows.find(x=>x.id===id);if(!r)return;viewId=id;
     if(b>a){const pc=Math.max(0,Math.min(100,(n-a)/(b-a)*100));prog=`<div class="rqh" style="grid-column:1/-1;margin-top:6px"><b>Time elapsed</b><span>${Math.round(pc)}%${n>b?" · past expected date":""}</span></div><div class="rqbar" style="grid-column:1/-1"><i style="width:${pc}%"></i></div>`}}
   const secs=[
    ["Personal information",[["Name",full],["Birthdate",fmt(r.birthdate)],["Address",r.address],["Bachelor's degree",r.bs],["Year graduated",r.bsYear],["School graduated",r.bsSchool]]],
-   ["Scholarship grant",[["Date granted",fmt(r.date)],["Level",r.degree],["Course",r.course],["School",r.school],["New or lateral",r.entryType],["Part time or full time",r.loadType],["Semester",r.semester],["School year",r.sy],["Date started",fm(r.dateEnrolled)],["Expected completion",fm(expGrad(r))],["Scholarship duration",durOf(r)],["Year enrolled",enrolledAY(r)],["Year level",yearLabel(r)],["Remarks",r.remarks]]]
+   ["Scholarship grant",[["Level",r.degree],["Course",r.course],["School",r.school],["New or lateral",r.entryType],["Part time or full time",r.loadType],["Date started",fm(r.dateEnrolled)],["Expected completion",fm(expGrad(r))],["Scholarship duration",durOf(r)],["Remarks",r.remarks]]]
   ];
   $("vbody").innerHTML=secs.map(([t,f])=>`<h3 class="sec">${t}</h3>`+f.map(([k,v])=>`<dt>${k}</dt><dd>${esc(v||"—")}</dd>`).join("")).join("")+
    `<h3 class="sec">Graduation tracker</h3><dt>Status</dt><dd><span class="gtag ${gcls(r)}">${esc(gst)}</span></dd>`+
@@ -390,14 +369,14 @@ $("rows").addEventListener("click",e=>{
 $("q").oninput=render;$("fd").onchange=render;
 
 $("csv").onclick=async()=>{
-  const h=["Surname","Given name","Middle name","Birthdate","Address","Bachelor's degree","Year graduated","School graduated","Date granted","Level","Course","School","New or lateral","Part time or full time","Semester","School year","Date started","Expected completion","Scholarship duration","Year enrolled","Year level","Graduation status","Date graduated","Remarks"];
+  const h=["Surname","Given name","Middle name","Birthdate","Address","Bachelor's degree","Year graduated","School graduated","Level","Course","School","New or lateral","Part time or full time","Date started","Expected completion","Scholarship duration","Graduation status","Date graduated","Remarks"];
   const q=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
-  const csv=[h.map(q).join(",")].concat(rows.map(r=>[r.surname??(r.name||"").split(",")[0],r.givenName??(r.name||"").split(",").slice(1).join(",").trim(),r.middleName,r.birthdate,r.address,r.bs,r.bsYear,r.bsSchool,r.date,r.degree,r.course,r.school,r.entryType,r.loadType,r.semester,r.sy,(r.dateEnrolled||"").slice(0,7),(expGrad(r)||"").slice(0,7),durOf(r),enrolledAY(r),yearLabel(r),r.gradStatus||"Ongoing",r.gradDate,r.remarks].map(q).join(","))).join("\n");
+  const csv=[h.map(q).join(",")].concat(rows.map(r=>[r.surname??(r.name||"").split(",")[0],r.givenName??(r.name||"").split(",").slice(1).join(",").trim(),r.middleName,r.birthdate,r.address,r.bs,r.bsYear,r.bsSchool,r.degree,r.course,r.school,r.entryType,r.loadType,(r.dateEnrolled||"").slice(0,7),(expGrad(r)||"").slice(0,7),durOf(r),r.gradStatus||"Ongoing",r.gradDate,r.remarks].map(q).join(","))).join("\n");
   saveFile("scholars.csv","\ufeff"+csv,"text/csv;charset=utf-8");
 };
 
 /* ===== Batch import from Excel ===== */
-const IMP_COLS=["Surname","Given name","Middle name","Birthdate","Address","Bachelor's degree","Year graduated","School graduated","Date granted","Level","Course","School","New or lateral","Part time or full time","Semester","School year","Date started","Expected completion","Scholarship duration","Graduation status","Date graduated","Remarks"];
+const IMP_COLS=["Surname","Given name","Middle name","Birthdate","Address","Bachelor's degree","Year graduated","School graduated","Level","Course","School","New or lateral","Part time or full time","Date started","Expected completion","Scholarship duration","Graduation status","Date graduated","Remarks"];
 const IMP_ALIAS={
  surname:["surname","lastname","familyname"],
  given:["givenname","firstname","given"],
@@ -407,7 +386,6 @@ const IMP_ALIAS={
  bs:["bachelorsdegree","bachelordegree","bachelors","bachelor","bsdegree","bscourse","bscoursegraduated","undergraduatecourse"],
  bsYear:["yeargraduated","bsyeargraduated","yeargraduatedbs","bachelorsyeargraduated"],
  bsSchool:["schoolgraduated","bsschool","undergraduateschool","bachelorsschool","schoolgraduatedbs"],
- date:["dategranted","datescholarshipgranted","scholarshipgranted","dategrant","scholarshipdate","date"],
  degree:["level","levelmsphd","degree","degreelevel"],
  course:["course","graduatecourse","graduateprogram","program"],
  school:["school","graduateschool","university"],
@@ -415,8 +393,6 @@ const IMP_ALIAS={
  loadType:["parttimeorfulltime","fulltimeorparttime","loadtype","studyload"],
  duration:["scholarshipduration","duration"],
  remarks:["remarks","remark","notes"],
- semester:["semester","sem"],
- sy:["schoolyear","sy","academicyear","ay"],
  dateEnrolled:["datestarted","datestartedmonthandyear","dateenrolled","startdate","enrollmentdate","dateofenrollment"],
  gradStatus:["graduationstatus","gradstatus","status"],
  gradExpected:["expectedcompletion","expectedcompletionmonthandyear","expectedcompletiondate","expectedgraduation","expectedgraduationdate","expectedgraddate"],
@@ -446,13 +422,6 @@ function impMonth(v){ // "" = empty, null = invalid; returns YYYY-MM
 function impEntry(v){const k=nk(v);if(!k)return"";if(/^n/.test(k))return"New";if(/^l/.test(k))return"Lateral";return null}
 function impLoad(v){const k=nk(v);if(!k)return"";if(/^f/.test(k))return"Full time";if(/^p/.test(k))return"Part time";return null}
 function impDegree(v){const k=nk(v);if(!k)return"";if(/^(phd|doctor|dphil)/.test(k))return"PhD";if(/^(ms|msc|master|mas)/.test(k))return"MS";return null}
-function impSem(v){const k=nk(v);if(!k)return"";if(/^(1|1st|first)/.test(k))return"1st Semester";if(/^(2|2nd|second)/.test(k))return"2nd Semester";if(/mid|summer/.test(k))return"Midyear";return null}
-function impSY(v){if(v===""||v==null)return"";if(typeof v==="number"&&v>=1990&&v<=2100)return v+"-"+(v+1);
-  const t=sv(v).replace(/[–—]/g,"-");let m;
-  if(m=t.match(/^(\d{4})\s*-\s*(\d{4})$/))return m[1]+"-"+m[2];
-  if(m=t.match(/^(\d{4})\s*-\s*(\d{2})$/))return m[1]+"-"+m[1].slice(0,2)+m[2];
-  if(m=t.match(/^(\d{4})$/))return m[1]+"-"+(+m[1]+1);
-  return null}
 function impStatus(v){const k=nk(v);if(!k)return"Ongoing";
   if(/leave|loa/.test(k))return"On leave";if(/ongo|active|enrolled/.test(k))return"Ongoing";if(/ext/.test(k))return"Extended";
   if(/grad/.test(k))return"Graduated";if(/term|drop|withdr/.test(k))return"Terminated";return null}
@@ -485,7 +454,7 @@ function parseImport(aoa,existing){
     if(!gn&&!errs.length)errs.push("Given name missing");
     const mv=sv(g("middle")),noMid=!mv||/^(n\/?a|none|no middle( name)?|-+|—)$/i.test(mv);
     const dt=(f,label,req)=>{const d=impDate(g(f));if(d===null){errs.push("Invalid "+label);return""}if(req&&!d)errs.push(label[0].toUpperCase()+label.slice(1)+" missing");return d};
-    const birth=dt("birth","birthdate"),date=dt("date","date granted"),gDate=dt("gradDate","date graduated");
+    const birth=dt("birth","birthdate"),gDate=dt("gradDate","date graduated");
     const mt=(f,label)=>{const d=impMonth(g(f));if(d===null){errs.push("Invalid "+label);return""}return d};
     const dEnr=mt("dateEnrolled","date started"),gExpIn=mt("gradExpected","expected completion");
     const degree=impDegree(g("degree"));if(degree===null)errs.push("Level must be MS or PhD");else if(!degree)errs.push("Level missing");
@@ -493,17 +462,14 @@ function parseImport(aoa,existing){
     const school=sv(g("school"));if(!school)errs.push("School missing");
     const entry=impEntry(g("entryType"));if(entry===null)errs.push("New or lateral must be New or Lateral");
     const load=impLoad(g("loadType"));if(load===null)errs.push("Part time or full time must be Full time or Part time");
-    const sem=impSem(g("semester"));if(sem===null)errs.push("Invalid semester");
-    const sy=impSY(g("sy"));if(sy===null)errs.push("School year must look like 2025-2026");
     const st=impStatus(g("gradStatus"));if(st===null)errs.push("Invalid graduation status");
     let by=g("bsYear");by=by===""?"":(/^\d{4}$/.test(sv(by))&&+sv(by)>=1950&&+sv(by)<=2100?+sv(by):null);if(by===null){errs.push("Invalid year graduated");by=""}
     const middle=noMid?"":mv;
     const rec={surname:sn,givenName:gn,middleName:middle,noMiddleName:noMid,name:sn+", "+gn+(middle?" "+middle:""),
       address:sv(g("address")),birthdate:birth,bs:sv(g("bs")),bsYear:by,bsSchool:sv(g("bsSchool")),
-      course,school,entryType:entry||"",loadType:load||"",remarks:sv(g("remarks")),degree:degree||"",semester:sem||"",sy:sy||"",date,dateEnrolled:dEnr,
+      course,school,entryType:entry||"",loadType:load||"",remarks:sv(g("remarks")),degree:degree||"",dateEnrolled:dEnr,
       gradStatus:st||"Ongoing",gradExpected:gExpIn||(dEnr?addYears(dEnr,GRAD_YEARS):""),duration:"",gradDate:st==="Graduated"?gDate:"",updated:Date.now()};
     rec.duration=durLabel(dEnr,rec.gradExpected)||sv(g("duration"));
-    if(dEnr)rec.yearEnrolled=ayOf(dEnr);
     let dup="";
     const k=keyOf(sn,gn),list=seen[k]||[];
     const hit=list.find(x=>!birth||!x.b||x.b===birth);
@@ -526,7 +492,7 @@ function showImp(fname){
   $("iFile").textContent="File: "+fname;
   $("iRows").innerHTML=impItems.map(it=>{const r=it.rec;
     const res=it.errs.length?`<span style="color:var(--danger)">${esc(it.errs.join("; "))}</span>`:it.dup?`<span style="color:#b9770e">Duplicate: ${esc(it.dup)}</span>`:`<span style="color:#1e8449">✓ Ready</span>`;
-    return `<tr><td>${it.n}</td><td>${esc(r.name)}</td><td>${esc(r.course)}</td><td>${esc(r.school)}</td><td>${esc(r.degree)}</td><td>${esc(r.date)}</td><td>${res}</td></tr>`}).join("");
+    return `<tr><td>${it.n}</td><td>${esc(r.name)}</td><td>${esc(r.course)}</td><td>${esc(r.school)}</td><td>${esc(r.degree)}</td><td>${res}</td></tr>`}).join("");
   $("iSkipDup").checked=true;impSummary();$("imodal").hidden=false;
 }
 function closeImp(){impItems=[];$("imodal").hidden=true;$("iGo").disabled=false}
@@ -569,15 +535,13 @@ $("tplBtn").onclick=async()=>{
   const notes=[["Column","What to enter"],
    ["Surname, Given name","Required."],
    ["Middle name","Leave blank (or type N/A) if the scholar has no middle name."],
-   ["Birthdate, Date granted, Date graduated","Excel dates or YYYY-MM-DD. All optional here (the Add Scholar form asks for Date granted)."],
+   ["Birthdate, Date graduated","Excel dates or YYYY-MM-DD. Both optional."],
    ["Address, Bachelor's degree, Year graduated, School graduated","Optional. Year graduated is the 4-digit year the BS was finished."],
    ["Level","Required: MS or PhD."],
    ["Course","Required, e.g. Agronomy, Animal Science, Entomology, Food Science and Technology, Horticulture, Soil Science (other courses are accepted)."],
    ["School","Required."],
    ["New or lateral","New or Lateral (optional)."],
    ["Part time or full time","Full time or Part time (optional)."],
-   ["Semester","1st Semester, 2nd Semester or Midyear."],
-   ["School year","Like 2025-2026."],
    ["Date started, Expected completion","Month and year, e.g. August 2025 or 2025-08. Leave Expected completion blank to set it to 2 years after Date started."],
    ["Scholarship duration","Leave blank: it is worked out from Date started and Expected completion."],
    ["Graduation status","Ongoing, Extended, On leave, Graduated or Terminated (blank = Ongoing)."],
