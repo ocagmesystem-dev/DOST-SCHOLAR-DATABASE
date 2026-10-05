@@ -88,6 +88,21 @@ nav button.on{color:var(--accent);border-bottom-color:var(--accent)}
 .lgbox form{grid-template-columns:1fr}
 .lgerr{color:var(--danger);font-size:13px;min-height:18px}
 .signout{background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.45);padding:3px 10px;font-size:12px;border-radius:6px;cursor:pointer}
+
+/* ---- Chart dashboard: blue + dark green ---- */
+:root{--g1:#0b3d2e;--g2:#14633f;--g3:#2e8b57;--b1:#0b3d91;--b2:#0a6fd0;--b3:#4db8ff}
+.stat{position:relative;overflow:hidden}
+.stat:nth-child(odd){border-left-color:#0a6fd0}.stat:nth-child(even){border-left-color:#14633f}
+.stat b{color:var(--b1)}.stat:nth-child(even) b{color:var(--g2)}
+.cgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-bottom:12px}
+.cgrid .panel{margin-bottom:0}.cgrid .wide{grid-column:1/-1}
+.panel h2{display:flex;align-items:center;gap:8px;color:var(--b1)}
+.panel h2:before{content:"";width:4px;height:14px;border-radius:2px;background:linear-gradient(var(--b2),var(--g2))}
+.cbox{position:relative;height:250px}.cbox.tall{height:320px}
+.cbox canvas{max-width:100%}
+.cnote{font-size:12px;color:var(--mute);text-align:center;padding:90px 0}
+.rec .tag.PhD{color:var(--g2)}
+@media(prefers-color-scheme:dark){:root{--bg:#0a1a1a;--card:#10252a;--ink:#e6f3ef;--mute:#9ab5ad;--line:#1f3d40}.stat b,.panel h2{color:#9fd8ff}.stat:nth-child(even) b{color:#6fd3a1}}
 </style>
 </head>
 <body>
@@ -108,10 +123,15 @@ nav button.on{color:var(--accent);border-bottom-color:var(--accent)}
   <div class="stat"><b id="sSch">0</b><span>Schools</span></div>
   <div class="stat"><b id="sCrs">0</b><span>Courses</span></div>
 </div>
-<div class="grid2">
-  <div class="panel"><h2>By school</h2><div id="bSchool"></div></div>
-  <div class="panel"><h2>By course</h2><div id="bCourse"></div></div>
-  <div class="panel"><h2>Recently added</h2><div id="recent"></div></div>
+<div class="cgrid">
+  <div class="panel"><h2>Scholars by level</h2><div class="cbox"><canvas id="cLevel"></canvas></div></div>
+  <div class="panel"><h2>Graduation status</h2><div class="cbox"><canvas id="cStatus"></canvas></div></div>
+  <div class="panel"><h2>New vs lateral entry</h2><div class="cbox"><canvas id="cEntry"></canvas></div></div>
+  <div class="panel"><h2>Full time vs part time</h2><div class="cbox"><canvas id="cLoad"></canvas></div></div>
+  <div class="panel wide"><h2>Scholars by school</h2><div class="cbox tall"><canvas id="cSchool"></canvas></div></div>
+  <div class="panel wide"><h2>Scholars by course (MS vs PhD)</h2><div class="cbox tall"><canvas id="cCourse"></canvas></div></div>
+  <div class="panel wide"><h2>Scholars started per year</h2><div class="cbox"><canvas id="cYear"></canvas></div></div>
+  <div class="panel wide"><h2>Recently added</h2><div id="recent"></div></div>
 </div>
 </section>
 
@@ -201,6 +221,7 @@ nav button.on{color:var(--accent);border-bottom-color:var(--accent)}
     </form>
   </div>
 </div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
@@ -217,18 +238,56 @@ function render(){
   dash();
   $("rows").innerHTML=list.length?list.map((r,i)=>`<tr><td>${i+1}</td><td>${esc(r.name)}</td><td>${esc(r.course)}</td><td>${esc(r.school)}</td><td><span class="tag ${r.degree==="PhD"?"PhD":"MS"}">${esc(r.degree)}</span></td><td><span class="gtag ${gcls(r)}">${esc(r.gradStatus||"Ongoing")}</span></td><td style="white-space:nowrap"><button data-w="${esc(r.id)}">View</button>${canWrite?` <button data-e="${esc(r.id)}">Update</button> <button class="d" data-d="${esc(r.id)}">Delete</button>`:""}</td></tr>`).join(""):`<tr><td colspan="7" class="empty">No scholars yet. Add the first record above.</td></tr>`;
 }
-function bars(id,keyFn){
-  const m={};rows.forEach(r=>{const k=keyFn(r);if(k)m[k]=(m[k]||0)+1});
-  const e=Object.entries(m).sort((a,b)=>b[1]-a[1]),max=e.length?e[0][1]:1;
-  $(id).innerHTML=e.length?e.slice(0,8).map(([k,n])=>`<div class="br"><span title="${esc(k)}">${esc(k)}</span><i style="width:${Math.max(6,n/max*100)}%"></i><span>${n}</span></div>`).join(""):'<div class="note">No data yet.</div>';
-  return e.length;
+const PAL=["#0b3d91","#14633f","#0a6fd0","#2e8b57","#4db8ff","#0b3d2e","#6fb7e9","#58b383","#08306b","#1f7a5a"];
+const charts={};
+function tally(keyFn){const m={};rows.forEach(r=>{const k=keyFn(r);if(k)m[k]=(m[k]||0)+1});return Object.entries(m).sort((a,b)=>b[1]-a[1])}
+function mk(id,cfg){
+  const el=$(id);if(!el||typeof Chart==="undefined")return;
+  if(charts[id]){charts[id].data=cfg.data;charts[id].options=cfg.options;charts[id].update();return}
+  charts[id]=new Chart(el,cfg);
+}
+const txt=()=>getComputedStyle(document.body).color;
+function pie(id,type,entries,colors){
+  const e=entries.length?entries:[["No data",1]];
+  const empty=!entries.length;
+  mk(id,{type,data:{labels:e.map(x=>x[0]),datasets:[{data:e.map(x=>x[1]),backgroundColor:empty?["#d6e4f5"]:colors||PAL,borderColor:"#fff",borderWidth:2,hoverOffset:8}]},
+    options:{responsive:true,maintainAspectRatio:false,cutout:type==="doughnut"?"58%":0,
+      plugins:{legend:{position:"bottom",labels:{color:txt(),boxWidth:12,padding:12}},tooltip:{enabled:!empty,callbacks:{label:c=>{const t=c.dataset.data.reduce((a,b)=>a+b,0);return` ${c.label}: ${c.parsed} (${Math.round(c.parsed/t*100)}%)`}}}}}});
+}
+function hbar(id,entries,cut){
+  const e=entries.slice(0,cut||8);
+  mk(id,{type:"bar",data:{labels:e.map(x=>x[0].length>34?x[0].slice(0,32)+"…":x[0]),datasets:[{label:"Scholars",data:e.map(x=>x[1]),backgroundColor:e.map((_,i)=>i%2?"#14633f":"#0a6fd0"),borderRadius:6}]},
+    options:{indexAxis:"y",responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{beginAtZero:true,ticks:{precision:0,color:txt()},grid:{color:"rgba(10,111,208,.12)"}},y:{ticks:{color:txt()},grid:{display:false}}}}});
 }
 function dash(){
-  $("sAll").textContent=rows.length;
-  $("sMS").textContent=rows.filter(r=>r.degree==="MS").length;
-  $("sPhD").textContent=rows.filter(r=>r.degree==="PhD").length;
-  $("sSch").textContent=bars("bSchool",r=>(r.school||"").trim());
-  $("sCrs").textContent=bars("bCourse",r=>(r.course||"").trim());
+  const ms=rows.filter(r=>r.degree==="MS").length,phd=rows.filter(r=>r.degree==="PhD").length;
+  $("sAll").textContent=rows.length;$("sMS").textContent=ms;$("sPhD").textContent=phd;
+  const sch=tally(r=>(r.school||"").trim()),crs=tally(r=>(r.course||"").trim());
+  $("sSch").textContent=sch.length;$("sCrs").textContent=crs.length;
+
+  pie("cLevel","doughnut",[["MS",ms],["PhD",phd]].filter(x=>x[1]),["#0a6fd0","#14633f"]);
+  pie("cStatus","doughnut",tally(r=>r.gradStatus||"Ongoing"),["#0a6fd0","#2e8b57","#4db8ff","#0b3d2e","#0b3d91"]);
+  pie("cEntry","pie",tally(r=>r.entryType),["#0b3d91","#2e8b57"]);
+  pie("cLoad","pie",tally(r=>r.loadType),["#14633f","#4db8ff"]);
+  hbar("cSchool",sch,8);
+
+  // course stacked by level
+  const top=crs.slice(0,8).map(x=>x[0]);
+  const cnt=lv=>top.map(c=>rows.filter(r=>(r.course||"").trim()===c&&r.degree===lv).length);
+  mk("cCourse",{type:"bar",data:{labels:top.map(x=>x.length>28?x.slice(0,26)+"…":x),datasets:[
+      {label:"MS",data:cnt("MS"),backgroundColor:"#0a6fd0",borderRadius:4},
+      {label:"PhD",data:cnt("PhD"),backgroundColor:"#14633f",borderRadius:4}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:txt()}}},
+      scales:{x:{stacked:true,ticks:{color:txt(),maxRotation:40},grid:{display:false}},y:{stacked:true,beginAtZero:true,ticks:{precision:0,color:txt()},grid:{color:"rgba(10,111,208,.12)"}}}}});
+
+  // start year trend
+  const yrs={};rows.forEach(r=>{const y=(r.dateEnrolled||"").slice(0,4);if(/^\d{4}$/.test(y))yrs[y]=(yrs[y]||0)+1});
+  const ys=Object.keys(yrs).sort();
+  mk("cYear",{type:"line",data:{labels:ys,datasets:[{label:"Scholars started",data:ys.map(y=>yrs[y]),borderColor:"#14633f",backgroundColor:"rgba(10,111,208,.18)",fill:true,tension:.35,pointBackgroundColor:"#0b3d91",pointRadius:5}]},
+    options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:txt()},grid:{display:false}},y:{beginAtZero:true,ticks:{precision:0,color:txt()},grid:{color:"rgba(10,111,208,.12)"}}}}});
+
   const rc=rows.slice().sort((a,b)=>(b.updated||0)-(a.updated||0)).slice(0,6);
   $("recent").innerHTML=rc.length?rc.map(r=>`<div class="rec"><span>${esc(r.name)}<br><small>${esc(r.course)}${r.school?" · "+esc(r.school):""}</small></span><span class="tag ${r.degree==="PhD"?"PhD":"MS"}">${esc(r.degree)}</span></div>`).join(""):'<div class="note">No scholars yet.</div>';
 }
