@@ -189,6 +189,7 @@ nav button.on{color:var(--accent);border-bottom-color:var(--accent)}
   </div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 const $=id=>document.getElementById(id);
 let db=null,col=null,rows=[],editId=null,canWrite=true;
@@ -374,8 +375,7 @@ $("csv").onclick=async()=>{
   const h=["Surname","Given name","Middle name","Birthdate","Address","Bachelor's degree","Year graduated","School graduated","Date granted","Level","Course","School","New or lateral","Part time or full time","Semester","School year","Date started","Expected completion","Scholarship duration","Year enrolled","Year level","Graduation status","Date graduated","Remarks"];
   const q=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
   const csv=[h.map(q).join(",")].concat(rows.map(r=>[r.surname??(r.name||"").split(",")[0],r.givenName??(r.name||"").split(",").slice(1).join(",").trim(),r.middleName,r.birthdate,r.address,r.bs,r.bsYear,r.bsSchool,r.date,r.degree,r.course,r.school,r.entryType,r.loadType,r.semester,r.sy,(r.dateEnrolled||"").slice(0,7),(expGrad(r)||"").slice(0,7),durOf(r),enrolledAY(r),yearLabel(r),r.gradStatus||"Ongoing",r.gradDate,r.remarks].map(q).join(","))).join("\n");
-  try{const d=await claude.use("downloads");if(d){await d.save({filename:"scholars.csv",data:csv});return}}catch(e){}
-  alert("Download isn't available in this view.");
+  saveFile("scholars.csv","\ufeff"+csv,"text/csv;charset=utf-8");
 };
 
 /* ===== Batch import from Excel ===== */
@@ -568,21 +568,64 @@ $("tplBtn").onclick=async()=>{
   const ws2=XLSX.utils.aoa_to_sheet(notes);ws2["!cols"]=[{wch:60},{wch:100}];
   XLSX.utils.book_append_sheet(wb,ws2,"Instructions");
   const data=XLSX.write(wb,{bookType:"xlsx",type:"array"});
-  try{const d=await claude.use("downloads");if(d){await d.save({filename:"scholars-import-template.xlsx",data});return}}catch(e){}
-  alert("Download isn't available in this view.");
+  saveFile("scholars-import-template.xlsx",data,"application/octet-stream");
 };
+
+/* ===== Supabase online sync =====
+   1) Run supabase_setup.sql in your Supabase project (SQL Editor).
+   2) Paste your Project URL and anon public key below (Project Settings > API). */
+const SUPABASE_URL="sb_publishable_uxEpB-2ihTbFOMe6cXRbZA_yelC1E22";
+const SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im53anl6aGxkbGJ0a25tcGptY29nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTExODE1MjgsImV4cCI6MjEwNjc1NzUyOH0.sbCommmPWGSMh9Q6LGkLr-XkSGm4RRWnZkovoGGotBo";
+
+function saveFile(name,data,type){const b=new Blob([data],{type}),a=document.createElement("a");a.href=URL.createObjectURL(b);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+
+// Small adapter so the rest of the app keeps its collection/doc calls; data lives in Supabase.
+function makeDB(sb){
+  const CK="asthrdp_cache_v1";let cache={},subs=[],timer=null,busy=false,again=false,started=false;
+  try{cache=JSON.parse(localStorage.getItem(CK)||"{}")}catch(e){}
+  const keep=()=>{try{localStorage.setItem(CK,JSON.stringify(cache))}catch(e){}};
+  const emit=()=>{const docs=Object.entries(cache).map(([id,d])=>({id,data:()=>d})).sort((a,b)=>String(a.data().name||"").localeCompare(String(b.data().name||"")));subs.forEach(s=>s.ok({docs}))};
+  const need=r=>{if(r.error)throw r.error;return r.data};
+  async function load(){
+    if(busy){again=true;return}busy=true;
+    try{
+      let all=[],from=0;
+      for(;;){const d=need(await sb.from("scholars").select("id,data").order("id").range(from,from+999));all=all.concat(d);if(d.length<1000)break;from+=1000}
+      cache={};all.forEach(r=>cache[r.id]=r.data);keep();emit();setSync(true,"Synced · live");
+    }catch(e){setSync(false,"Offline · showing saved copy");emit()}
+    finally{busy=false;if(again){again=false;load()}}
+  }
+  const sched=()=>{clearTimeout(timer);timer=setTimeout(load,250)};
+  function start(){
+    if(started)return;started=true;
+    sb.channel("scholars-sync").on("postgres_changes",{event:"*",schema:"public",table:"scholars"},sched)
+      .subscribe(st=>{if(st==="SUBSCRIBED")sched();else if(st==="CHANNEL_ERROR"||st==="TIMED_OUT")setSync(false,"Reconnecting…")});
+    setInterval(load,30000);
+    addEventListener("online",load);
+    document.addEventListener("visibilitychange",()=>{if(!document.hidden)load()});
+  }
+  const scholars={
+    async add(rec){const d=need(await sb.from("scholars").insert({name:rec.name,data:rec}).select("id").single());cache[d.id]=rec;keep();emit();return{id:d.id}},
+    doc(id){return{
+      async update(rec){const m={...(cache[id]||{}),...rec};need(await sb.from("scholars").update({name:m.name,data:m,updated_at:new Date().toISOString()}).eq("id",id));cache[id]=m;keep();emit()},
+      async delete(){need(await sb.from("scholars").delete().eq("id",id));delete cache[id];keep();emit()}}},
+    orderBy(){return{onSnapshot(ok,bad){subs.push({ok,bad});emit();start();load()}}}
+  };
+  const photos={doc(id){return{
+    async get(){const d=need(await sb.from("photos").select("img").eq("id",id).maybeSingle());return{exists:!!d,data:()=>d}},
+    async set(o){need(await sb.from("photos").upsert({id,img:o.img}))},
+    async delete(){need(await sb.from("photos").delete().eq("id",id))}}}};
+  return{collection:n=>n==="photos"?photos:scholars};
+}
 
 (async()=>{
   try{
-    db=await claude.use("db");
-    const user=await claude.use("user");
-    if(user){const w=user.can("data.write");if(w===false){canWrite=false;$("addBtn").hidden=true;$("impBtn").hidden=true;$("f").querySelectorAll("input,select,textarea,button").forEach(x=>x.disabled=true);$("ro").hidden=false}}
-    if(!db){setSync(false,"Offline mode (not saved)");render();return}
+    if(!SUPABASE_URL||!SUPABASE_KEY){setSync(false,"Offline mode (add Supabase URL and key)");render();return}
+    if(typeof supabase==="undefined"){setSync(false,"Could not load Supabase library");render();return}
+    db=makeDB(supabase.createClient(SUPABASE_URL,SUPABASE_KEY));
     col=db.collection("scholars");
-    col.orderBy("name").onSnapshot(s=>{
-      rows=s.docs.map(d=>({id:d.id,...d.data()}));
-      setSync(true,"Synced · live");render();
-    },e=>{setSync(false,"Sync error: "+e.code);});
+    setSync(false,"Connecting…");
+    col.orderBy("name").onSnapshot(s=>{rows=s.docs.map(d=>({id:d.id,...d.data()}));render()});
   }catch(e){setSync(false,"Offline mode (not saved)")}
 })();
 render();
